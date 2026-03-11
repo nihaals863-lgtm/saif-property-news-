@@ -120,3 +120,164 @@ exports.getReports = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
+// GET /api/admin/reports/rent-roll
+exports.getRentRoll = async (req, res) => {
+    try {
+        const units = await prisma.unit.findMany({
+            include: {
+                property: true,
+                bedroomsList: true,
+                leases: {
+                    where: { status: 'Active' },
+                    include: { tenant: true }
+                }
+            }
+        });
+
+        let rentRollArray = [];
+        let totalUnits = 0;
+        let occupiedUnits = 0;
+        let vacantUnits = 0;
+        let occupiedBedrooms = 0;
+        let vacantBedrooms = 0;
+        let totalMonthlyRent = 0;
+
+        units.forEach(u => {
+            totalUnits++;
+            const isFullUnit = u.rentalMode === 'FULL_UNIT';
+            if (isFullUnit) {
+                // Determine if there is an active lease
+                const activeLease = u.leases[0];
+                if (activeLease) {
+                    occupiedUnits++;
+                    const rent = activeLease.monthlyRent ? parseFloat(activeLease.monthlyRent.toString()) : 0;
+                    totalMonthlyRent += rent;
+
+                    rentRollArray.push({
+                        id: `unit-${u.id}`,
+                        buildingName: u.property?.name || 'N/A',
+                        leaseType: 'Full Unit',
+                        unitNumber: u.unitNumber || u.name,
+                        bedroomNumber: '-',
+                        tenantName: activeLease.tenant ? (activeLease.tenant.companyName || `${activeLease.tenant.firstName || ''} ${activeLease.tenant.lastName || ''}`.trim() || activeLease.tenant.name || '-') : '-',
+                        startDate: activeLease.startDate,
+                        endDate: activeLease.endDate,
+                        monthlyRent: rent,
+                        status: 'Occupied'
+                    });
+                } else {
+                    vacantUnits++;
+                    rentRollArray.push({
+                        id: `unit-${u.id}`,
+                        buildingName: u.property?.name || 'N/A',
+                        leaseType: 'Full Unit',
+                        unitNumber: u.unitNumber || u.name,
+                        bedroomNumber: '-',
+                        tenantName: '-',
+                        startDate: null,
+                        endDate: null,
+                        monthlyRent: 0,
+                        status: 'Vacant'
+                    });
+                }
+            } else {
+                // BEDROOM_WISE mode
+                let unitIsFullyVacant = true;
+                let unitIsFullyOccupied = true;
+
+                if (u.bedroomsList.length === 0) {
+                    vacantUnits++;
+                } else {
+                    u.bedroomsList.forEach(bedroom => {
+                        // Priority 1: Check if there's an active lease specifically for this bedroom
+                        const bLease = u.leases.find(l =>
+                            l.bedroomId === bedroom.id ||
+                            (l.tenant && l.tenant.bedroomId === bedroom.id)
+                        );
+
+                        // Priority 2: Check if there's an active FULL_UNIT lease for the entire unit
+                        const unitLease = u.leases.find(l => l.leaseType === 'FULL_UNIT');
+
+                        const activeLease = bLease || unitLease;
+
+                        if (activeLease || bedroom.status === 'Occupied') {
+                            occupiedBedrooms++;
+                            unitIsFullyVacant = false;
+
+                            if (activeLease) {
+                                const rent = activeLease.monthlyRent ? parseFloat(activeLease.monthlyRent.toString()) : 0;
+                                // Only count rent towards total if it's a bedroom-specific lease
+                                // OR if it's a full unit lease but we're at the first bedroom (to avoid double counting)
+                                if (bLease || (unitLease && bedroom === u.bedroomsList[0])) {
+                                    totalMonthlyRent += rent;
+                                }
+
+                                rentRollArray.push({
+                                    id: `bed-${bedroom.id}`,
+                                    buildingName: u.property?.name || 'N/A',
+                                    leaseType: 'Bedroom Lease',
+                                    unitNumber: u.unitNumber || u.name,
+                                    bedroomNumber: bedroom.bedroomNumber,
+                                    tenantName: activeLease.tenant ? (activeLease.tenant.companyName || `${activeLease.tenant.firstName || ''} ${activeLease.tenant.lastName || ''}`.trim() || activeLease.tenant.name || '-') : '-',
+                                    startDate: activeLease.startDate,
+                                    endDate: activeLease.endDate,
+                                    monthlyRent: rent,
+                                    status: 'Occupied'
+                                });
+                            } else {
+                                rentRollArray.push({
+                                    id: `bed-${bedroom.id}`,
+                                    buildingName: u.property?.name || 'N/A',
+                                    leaseType: 'Bedroom Lease',
+                                    unitNumber: u.unitNumber || u.name,
+                                    bedroomNumber: bedroom.bedroomNumber,
+                                    tenantName: 'Unknown (Occupied)',
+                                    startDate: null,
+                                    endDate: null,
+                                    monthlyRent: 0,
+                                    status: 'Occupied'
+                                });
+                            }
+                        } else {
+                            vacantBedrooms++;
+                            unitIsFullyOccupied = false;
+                            rentRollArray.push({
+                                id: `bed-${bedroom.id}`,
+                                buildingName: u.property?.name || 'N/A',
+                                leaseType: 'Bedroom Lease',
+                                unitNumber: u.unitNumber || u.name,
+                                bedroomNumber: bedroom.bedroomNumber,
+                                tenantName: '-',
+                                startDate: null,
+                                endDate: null,
+                                monthlyRent: parseFloat(bedroom.rentAmount || 0),
+                                status: 'Vacant'
+                            });
+                        }
+                    });
+
+                    if (unitIsFullyVacant) vacantUnits++;
+                    else if (unitIsFullyOccupied) occupiedUnits++;
+                    else occupiedUnits++; // Partially occupied is counted as occupied unit broadly
+                }
+            }
+        });
+
+        res.json({
+            summary: {
+                totalUnits,
+                occupiedUnits,
+                occupiedBedrooms,
+                vacantUnits,
+                vacantBedrooms,
+                totalMonthlyRent
+            },
+            rentRoll: rentRollArray
+        });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ message: 'Server error generating rent roll' });
+    }
+};

@@ -60,13 +60,28 @@ exports.downloadInvoicePDF = async (req, res) => {
             where: { id, tenantId: userId },
             include: {
                 tenant: true,
-                unit: true
+                unit: {
+                    include: { property: true }
+                },
+                lease: {
+                    include: { bedroom: true }
+                }
             }
         });
 
         if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
 
-        generateInvoicePDF(invoice, res);
+        // Fetch Branding Settings
+        const settingsList = await prisma.systemSetting.findMany();
+        const settings = {};
+        settingsList.forEach(s => {
+            if (s.key === 'companyName') settings['company_name'] = s.value;
+            else if (s.key === 'companyAddress') settings['company_address'] = s.value;
+            else if (s.key === 'companyPhone') settings['company_phone'] = s.value;
+            else settings[s.key] = s.value;
+        });
+
+        generateInvoicePDF(invoice, res, settings);
     } catch (e) {
         console.error(e);
         res.status(500).json({ message: 'Error generating PDF' });

@@ -8,7 +8,12 @@ exports.downloadInvoicePDF = async (req, res) => {
             where: { id: parseInt(req.params.id) },
             include: {
                 tenant: true,
-                unit: true
+                unit: {
+                    include: { property: true }
+                },
+                lease: {
+                    include: { bedroom: true }
+                }
             }
         });
 

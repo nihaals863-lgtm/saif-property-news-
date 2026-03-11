@@ -16,6 +16,7 @@ router.get('/financials', ownerController.getOwnerFinancials);
 router.get('/invoices/:id/download', ownerController.downloadInvoice);
 router.get('/profile', ownerController.getOwnerProfile);
 router.get('/reports', ownerController.getOwnerReports);
+router.get('/reports/rent-roll', ownerController.getOwnerRentRoll);
 router.get('/reports/:type/download', ownerController.downloadReport);
 
 module.exports = router;

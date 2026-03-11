@@ -19,16 +19,13 @@ exports.getAllUnits = async (req, res) => {
                 where,
                 include: {
                     property: true,
+                    bedroomsList: true, // Need this to verify actual occupancy
                     leases: {
                         where: { status: 'Active' },
                         select: {
                             id: true,
                             status: true,
                             tenant: { select: { type: true } },
-                            startDate: true,
-                            endDate: true,
-                            monthlyRent: true,
-                            securityDeposit: true
                         }
                     }
                 },
@@ -45,25 +42,40 @@ exports.getAllUnits = async (req, res) => {
                 ? `${u.property.civicNumber}-${u.unitNumber}`
                 : u.unitNumber || u.name;
 
+            // DYNAMIC STATUS CORRECTION: 
+            // If rentalMode is BEDROOM_WISE and all rooms are occupied, status MUST be Fully Booked
+            let displayStatus = u.status;
+            if (u.rentalMode === 'BEDROOM_WISE' && u.bedroomsList.length > 0) {
+                const totalRooms = u.bedroomsList.length;
+                const occupiedRooms = u.bedroomsList.filter(b => b.status === 'Occupied').length;
+
+                if (occupiedRooms === totalRooms) {
+                    displayStatus = 'Fully Booked';
+                } else if (occupiedRooms > 0) {
+                    displayStatus = 'Occupied';
+                } else {
+                    displayStatus = 'Vacant';
+                }
+            }
+
             return {
                 id: u.id,
                 unitNumber: u.unitNumber || u.name,
                 unit_identifier: unitIdentifier,
-                unitIdentifier: unitIdentifier, // Alias for consistency
+                unitIdentifier: unitIdentifier,
                 unitType: u.unitType,
                 floor: u.floor,
                 civicNumber: u.property.civicNumber,
                 building: u.property.civicNumber || u.property.name,
                 buildingName: u.property.name,
-                status: u.status,
+                status: displayStatus, // Use corrected status
                 propertyId: u.propertyId,
                 bedrooms: u.bedrooms,
                 rentalMode: u.rentalMode,
                 activeLeaseCount: u.leases ? u.leases.length : 0,
-                activeLeaseCount: u.leases ? u.leases.length : 0,
                 hasCompanyLease: u.leases ? u.leases.some(l => l.tenant.type === 'COMPANY') : false,
                 companyLeaseDetails: u.leases ? u.leases.find(l => l.tenant.type === 'COMPANY') : null,
-                draftLeaseCount: 0, // Simplified
+                draftLeaseCount: 0,
                 activeLeases: u.leases ? u.leases.length : 0
             };
         });
@@ -170,16 +182,24 @@ exports.createUnit = async (req, res) => {
         }
 
         // Format exactly as frontend expects for the list
+        const unitIdentifier = newUnit.property.civicNumber && newUnit.unitNumber
+            ? `${newUnit.property.civicNumber}-${newUnit.unitNumber}`
+            : newUnit.unitNumber || newUnit.name;
+
         const formatted = {
             id: newUnit.id,
             unitNumber: newUnit.unitNumber || newUnit.name,
+            unit_identifier: unitIdentifier,
+            unitIdentifier: unitIdentifier,
             unitType: newUnit.unitType,
             floor: newUnit.floor,
             civicNumber: newUnit.property.civicNumber,
             building: newUnit.property.civicNumber || newUnit.property.name,
+            buildingName: newUnit.property.name,
             status: newUnit.status,
             propertyId: newUnit.propertyId,
-            bedrooms: newUnit.bedrooms
+            bedrooms: newUnit.bedrooms,
+            rentalMode: newUnit.rentalMode
         };
 
         res.status(201).json(formatted);
@@ -232,6 +252,21 @@ exports.getUnitDetails = async (req, res) => {
         const activeLease = unit.leases.find(l => l.status === 'Active');
         const history = unit.leases.filter(l => l.status !== 'Active');
 
+        // DYNAMIC STATUS CORRECTION: 
+        let displayStatus = unit.status;
+        if (unit.rentalMode === 'BEDROOM_WISE' && unit.bedroomsList.length > 0) {
+            const totalRooms = unit.bedroomsList.length;
+            const occupiedRooms = unit.bedroomsList.filter(b => b.status === 'Occupied').length;
+
+            if (occupiedRooms === totalRooms) {
+                displayStatus = 'Fully Booked';
+            } else if (occupiedRooms > 0) {
+                displayStatus = 'Occupied';
+            } else {
+                displayStatus = 'Vacant';
+            }
+        }
+
         // Transform to match frontend Skeleton needs
         res.json({
             id: unit.id,
@@ -241,9 +276,9 @@ exports.getUnitDetails = async (req, res) => {
             building: unit.property.civicNumber || unit.property.name,
             propertyId: unit.propertyId,
             floor: unit.floor,
-            status: unit.status,
+            status: displayStatus,
             bedrooms: unit.bedrooms,
-            rentalMode: unit.rentalMode, // Added rentalMode to response
+            rentalMode: unit.rentalMode,
             bedroomsList: unit.bedroomsList.map(b => ({
                 id: b.id,
                 bedroomNumber: b.bedroomNumber,

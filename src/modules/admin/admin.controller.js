@@ -266,6 +266,7 @@ exports.getAvailableProperties = async (req, res) => {
 exports.getProperties = async (req, res) => {
     try {
         const properties = await prisma.property.findMany({
+            orderBy: { id: 'desc' },
             include: {
                 units: {
                     select: {

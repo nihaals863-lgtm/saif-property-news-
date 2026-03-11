@@ -91,7 +91,8 @@ exports.getLeaseHistory = async (req, res) => {
                 endDate: l.endDate ? l.endDate.toISOString().substring(0, 10) : '',
                 monthlyRent: l.monthlyRent || 0,
                 isCredentialsSent: isCredentialsSent,
-                tenantId: l.tenantId
+                tenantId: l.tenantId,
+                propertyId: l.unit.propertyId
             };
         });
 

@@ -6,8 +6,18 @@ const PDFDocument = require('pdfkit');
  * @param {Object} res - Express response object
  * @param {Object} settings - System settings for branding
  */
+/**
+ * Generates an Invoice PDF
+ * @param {Object} invoice - Invoice object from DB (enriched with relations)
+ * @param {Object} res - Express response object
+ * @param {Object} settings - System settings for branding
+ */
 const generateInvoicePDF = (invoice, res, settings = {}) => {
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({
+        margin: 50,
+        size: 'A4',
+        bufferPages: true
+    });
 
     // Set Response Headers
     res.setHeader('Content-Type', 'application/pdf');
@@ -15,86 +25,124 @@ const generateInvoicePDF = (invoice, res, settings = {}) => {
 
     doc.pipe(res);
 
-    // Header with Logo
-    const logoUrl = settings.company_logo || 'c:\\Users\\Admin\\Desktop\\backup_code_property\\frontend\\public\\assets\\logo.png';
+    // --- HELPER: Colors & Styles ---
+    const colors = {
+        primary: '#4f46e5', // Indigo 600
+        secondary: '#64748b', // Slate 500
+        text: '#1e293b', // Slate 800
+        lightText: '#94a3b8', // Slate 400
+        border: '#e2e8f0', // Slate 200
+        accent: '#f8fafc' // Slate 50
+    };
+
+    // --- HEADER SECTION ---
+    const logoPath = 'c:\\Users\\Admin\\Desktop\\property_new_clone\\frontned_property\\public\\assets\\logo.png';
     try {
-        // Simple check if it's a local path or URL (simplified for this env)
-        doc.image(logoUrl, 50, 45, { width: 40 });
+        doc.image(logoPath, 50, 45, { width: 140 });
+        // Precise masking of the sub-text area under the "MASTEKO" name
+        doc.save(); // Save state
+        doc.rect(50, 70, 150, 40).fill('#ffffff');
+        doc.restore(); // Restore state
     } catch (e) {
-        console.warn('Logo not found or invalid, skipping image');
+        doc.fontSize(24).fillColor(colors.primary).font('Helvetica-Bold').text('MASTEKO', 50, 50);
     }
 
-    const companyName = settings.company_name || 'Masteko';
-    const companyAddress = settings.company_address || '';
-    const companyPhone = settings.company_phone || '';
+    // Header info removed at user request (Company details and taglines)
 
-    doc.fontSize(20).font('Helvetica-Bold').text(companyName, 100, 50);
+    doc.moveTo(50, 115).lineTo(550, 115).strokeColor(colors.border).lineWidth(1).stroke();
 
-    let currentHeaderY = 80;
-    if (companyAddress) {
-        doc.fontSize(10).font('Helvetica').text(companyAddress, 100, currentHeaderY);
-        currentHeaderY += (companyAddress.split('\n').length * 12);
-    }
-    if (companyPhone) {
-        doc.fontSize(10).font('Helvetica').text(`Phone: ${companyPhone}`, 100, currentHeaderY);
-    }
+    // --- INVOICE TITLE & INFO ---
+    doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(22).text('INVOICE', 50, 140);
 
-    const isService = invoice.category === 'SERVICE';
-    doc.fontSize(20).text(isService ? 'SERVICE FEE INVOICE' : 'RENT INVOICE', 50, 140, { align: 'right' });
-    doc.moveDown();
+    // Status Badge removed at user request (e.g. "SENT")
 
-    // Invoice Info
-    doc.fontSize(12).text(`Invoice Number: ${invoice.invoiceNo}`);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`);
-    doc.text(`Billing Month: ${invoice.month}`);
-    doc.moveDown();
+    // Invoice Meta (right aligned)
+    let metaY = 175;
+    const drawMeta = (label, value) => {
+        doc.fillColor(colors.secondary).font('Helvetica-Bold').fontSize(10).text(label, 350, metaY);
+        doc.fillColor(colors.text).font('Helvetica').fontSize(10).text(value, 460, metaY, { align: 'right', width: 90 });
+        metaY += 18;
+    };
 
-    // Tenant Info
-    doc.fontSize(14).text('Billed To:', { underline: true });
-    doc.fontSize(12).text(`Tenant: ${invoice.tenant?.name || 'N/A'}`);
-    doc.text(`Unit: ${invoice.unit?.name || 'N/A'}`);
-    doc.moveDown();
+    drawMeta('Invoice Number:', invoice.invoiceNo);
+    drawMeta('Invoice Date:', new Date(invoice.createdAt || Date.now()).toLocaleDateString());
+    drawMeta('Billing Period:', invoice.month || 'N/A');
+    drawMeta('Due Date:', invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : 'Upon Receipt');
 
-    // Table Header
-    const tableTop = 300;
-    doc.fontSize(12).text('Description', 50, tableTop);
-    doc.text('Amount', 400, tableTop, { align: 'right' });
+    // --- BILLING DETAILS SECTION ---
+    doc.moveTo(50, 260).lineTo(550, 260).strokeColor(colors.border).lineWidth(0.5).stroke();
 
-    doc.moveTo(50, tableTop + 15).lineTo(550, tableTop + 15).stroke();
+    // Billed To
+    doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(12).text('BILLED TO', 50, 280);
+    doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(11).text(invoice.tenant?.name || 'Valued Tenant', 50, 300);
+    doc.fillColor(colors.secondary).font('Helvetica').fontSize(9).text(invoice.tenant?.email || '', 50, 314);
+    doc.text(invoice.tenant?.phone || '', 50, 326);
 
-    // Table Content
-    let currentY = tableTop + 30;
+    // Property Details
+    doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(12).text('PROPERTY DETAILS', 300, 280);
+    doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(10).text(invoice.unit?.property?.name || 'N/A', 300, 300);
+    doc.font('Helvetica').fontSize(9).fillColor(colors.secondary);
+    doc.text(`Unit: ${invoice.unit?.name || 'N/A'}`, 300, 314);
 
-    if (isService) {
-        doc.text(invoice.description || 'Service Fee Payment', 50, currentY);
-        doc.text(`$${parseFloat(invoice.serviceFees || 0).toFixed(2)}`, 400, currentY, { align: 'right' });
-        currentY += 20;
+    // Bedroom details if applicable
+    if (invoice.lease?.bedroom) {
+        doc.text(`Bedroom: ${invoice.lease.bedroom.bedroomNumber}`, 300, 326);
+    } else if (invoice.leaseType === 'BEDROOM_WISE' || invoice.lease?.leaseType === 'BEDROOM_WISE') {
+        doc.text('Bedroom Wise Rental', 300, 326);
     } else {
-        doc.text('Monthly Rent Payment', 50, currentY);
-        doc.text(`$${parseFloat(invoice.rent || 0).toFixed(2)}`, 400, currentY, { align: 'right' });
-        currentY += 20;
-
-        if (parseFloat(invoice.serviceFees || 0) > 0) {
-            doc.text('Common Area Service Fees', 50, currentY);
-            doc.text(`$${parseFloat(invoice.serviceFees || 0).toFixed(2)}`, 400, currentY, { align: 'right' });
-            currentY += 20;
-        }
+        doc.text('Full Unit Lease', 300, 326);
     }
 
-    doc.moveTo(50, currentY).lineTo(550, currentY).stroke();
-    currentY += 10;
+    // --- TABLE SECTION ---
+    const tableTop = 380;
+    doc.fillColor(colors.accent).rect(50, tableTop, 500, 25).fill();
 
-    // Total
-    doc.fontSize(14).text('Total Due:', 300, currentY);
-    doc.text(`$${parseFloat(invoice.amount).toFixed(2)}`, 400, currentY, { align: 'right' });
+    doc.fillColor(colors.secondary).font('Helvetica-Bold').fontSize(9);
+    doc.text('DESCRIPTION', 60, tableTop + 8);
+    doc.text('CATEGORY', 250, tableTop + 8);
+    doc.text('AMOUNT', 450, tableTop + 8, { align: 'right', width: 90 });
 
-    // Footer
-    doc.fontSize(10).text(
-        'Thank you for being a valued tenant. Please ensure payments are made before the due date.',
-        50,
-        700,
-        { align: 'center', width: 500 }
-    );
+    let currentY = tableTop + 35;
+    const drawRow = (desc, cat, amt) => {
+        doc.fillColor(colors.text).font('Helvetica').fontSize(10).text(desc, 60, currentY, { width: 180 });
+        doc.fillColor(colors.secondary).text(cat, 250, currentY);
+        doc.fillColor(colors.text).font('Helvetica-Bold').text(`$${parseFloat(amt).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 450, currentY, { align: 'right', width: 90 });
+        currentY += 25;
+        doc.moveTo(50, currentY - 5).lineTo(550, currentY - 5).strokeColor(colors.accent).lineWidth(0.5).stroke();
+    };
+
+    // Rent Row
+    if (parseFloat(invoice.rent) > 0) {
+        drawRow('Monthly Rent Coverage', invoice.category === 'DEPOSIT' ? 'Security Deposit' : 'Rental Income', invoice.rent);
+    }
+
+    // Service Fees Row
+    if (parseFloat(invoice.serviceFees) > 0) {
+        drawRow(invoice.description || 'Service/Utility Fees', 'Service Charges', invoice.serviceFees);
+    }
+
+    // Other items? (Invoice amount fallback)
+    if (currentY === tableTop + 35) {
+        drawRow(invoice.description || 'Property Management Charges', invoice.category, invoice.amount);
+    }
+
+    // --- TOTALS SECTION ---
+    currentY += 20;
+    doc.fillColor(colors.accent).rect(340, currentY, 210, 80).fill();
+
+    let totalY = currentY + 15;
+    const drawTotalRow = (label, value, isBold = false) => {
+        doc.fillColor(colors.secondary).font(isBold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10).text(label, 350, totalY);
+        doc.fillColor(isBold ? colors.primary : colors.text).font('Helvetica-Bold').fontSize(10).text(value, 450, totalY, { align: 'right', width: 90 });
+        totalY += 20;
+    };
+
+    drawTotalRow('Subtotal:', `$${parseFloat(invoice.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`);
+    drawTotalRow('Paid Amount:', `$${parseFloat(invoice.paidAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`);
+    drawTotalRow('TOTAL DUE:', `$${parseFloat(invoice.balanceDue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, true);
+
+    // --- FOOTER SECTION ---
+    // Removed at user request
 
     doc.end();
 };

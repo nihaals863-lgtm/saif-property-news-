@@ -96,6 +96,7 @@ router.post('/communication/bulk-delete', communicationController.bulkDeleteLogs
 
 router.get('/analytics/revenue', analyticsController.getRevenueStats);
 router.get('/analytics/vacancy', analyticsController.getVacancyStats);
+router.get('/reports/rent-roll', reportsController.getRentRoll);
 router.get('/reports', reportsController.getReports);
 router.get('/reports/:id/download', reportsController.downloadReportPDF);
 
