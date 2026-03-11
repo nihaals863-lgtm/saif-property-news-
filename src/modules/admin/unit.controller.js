@@ -43,16 +43,25 @@ exports.getAllUnits = async (req, res) => {
                 : u.unitNumber || u.name;
 
             // DYNAMIC STATUS CORRECTION: 
-            // If rentalMode is BEDROOM_WISE and all rooms are occupied, status MUST be Fully Booked
             let displayStatus = u.status;
-            if (u.rentalMode === 'BEDROOM_WISE' && u.bedroomsList.length > 0) {
+            if (u.rentalMode === 'BEDROOM_WISE') {
                 const totalRooms = u.bedroomsList.length;
-                const occupiedRooms = u.bedroomsList.filter(b => b.status === 'Occupied').length;
+                const occupiedRoomIds = new Set(u.leases.filter(l => l.bedroomId).map(l => l.bedroomId));
+                const occupiedRooms = u.bedroomsList.filter(b => b.status === 'Occupied' || occupiedRoomIds.has(b.id)).length;
 
-                if (occupiedRooms === totalRooms) {
+                if (totalRooms > 0) {
+                    if (occupiedRooms === totalRooms) {
+                        displayStatus = 'Fully Booked';
+                    } else if (occupiedRooms > 0) {
+                        displayStatus = 'Occupied';
+                    } else {
+                        displayStatus = 'Vacant';
+                    }
+                }
+            } else {
+                // For FULL_UNIT mode
+                if (u.leases && u.leases.length > 0) {
                     displayStatus = 'Fully Booked';
-                } else if (occupiedRooms > 0) {
-                    displayStatus = 'Occupied';
                 } else {
                     displayStatus = 'Vacant';
                 }
@@ -254,14 +263,25 @@ exports.getUnitDetails = async (req, res) => {
 
         // DYNAMIC STATUS CORRECTION: 
         let displayStatus = unit.status;
-        if (unit.rentalMode === 'BEDROOM_WISE' && unit.bedroomsList.length > 0) {
+        if (unit.rentalMode === 'BEDROOM_WISE') {
             const totalRooms = unit.bedroomsList.length;
-            const occupiedRooms = unit.bedroomsList.filter(b => b.status === 'Occupied').length;
+            const occupiedRoomIds = new Set(unit.leases.filter(l => l.status === 'Active' && l.bedroomId).map(l => l.bedroomId));
+            const occupiedRooms = unit.bedroomsList.filter(b => b.status === 'Occupied' || occupiedRoomIds.has(b.id)).length;
 
-            if (occupiedRooms === totalRooms) {
+            if (totalRooms > 0) {
+                if (occupiedRooms === totalRooms) {
+                    displayStatus = 'Fully Booked';
+                } else if (occupiedRooms > 0) {
+                    displayStatus = 'Occupied';
+                } else {
+                    displayStatus = 'Vacant';
+                }
+            }
+        } else {
+            // For FULL_UNIT mode
+            const activeLease = unit.leases.find(l => l.status === 'Active');
+            if (activeLease) {
                 displayStatus = 'Fully Booked';
-            } else if (occupiedRooms > 0) {
-                displayStatus = 'Occupied';
             } else {
                 displayStatus = 'Vacant';
             }

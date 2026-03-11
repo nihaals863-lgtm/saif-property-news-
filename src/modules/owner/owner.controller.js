@@ -30,18 +30,32 @@ exports.getOwnerDashboardStats = async (req, res) => {
 
         const units = await prisma.unit.findMany({
             where: { propertyId: { in: propertyIds } },
-            include: { bedroomsList: true, property: true }
+            include: {
+                bedroomsList: true,
+                property: true,
+                leases: { where: { status: 'Active' } }
+            }
         });
 
         units.forEach(u => {
             if (u.rentalMode === 'BEDROOM_WISE') {
-                const occBeds = u.bedroomsList.filter(b => b.status === 'Occupied').length;
-                const vacBeds = u.bedroomsList.filter(b => b.status === 'Vacant');
+                // If it's bedroom-wise, we should count occupied rooms
+                // A room is occupied if its status is Occupied OR if there is an active lease for it
+                const occupiedRoomIds = new Set(u.leases.filter(l => l.bedroomId).map(l => l.bedroomId));
+
+                const rooms = u.bedroomsList.map(b => ({
+                    ...b,
+                    isOccupied: b.status === 'Occupied' || occupiedRoomIds.has(b.id)
+                }));
+
+                const occBeds = rooms.filter(r => r.isOccupied).length;
+                const vacBeds = rooms.filter(r => !r.isOccupied);
+
                 occupiedBedroomsCount += occBeds;
                 vacantBedroomsCount += vacBeds.length;
 
-                vacBeds.forEach(vb => {
-                    vacantBedroomsList.push(`${u.property.name} - Unit ${u.unitNumber} (Rm ${vb.bedroomNumber})`);
+                vacBeds.forEach(v => {
+                    vacantBedroomsList.push(`${u.property.name} - Unit ${u.unitNumber} (Rm ${v.bedroomNumber})`);
                 });
 
                 if (occBeds > 0) occupiedUnitsCount++;
@@ -50,7 +64,9 @@ exports.getOwnerDashboardStats = async (req, res) => {
                     vacantUnitsList.push(`${u.property.name} - Unit ${u.unitNumber}`);
                 }
             } else {
-                if (u.status === 'Occupied' || u.status === 'Fully Booked') {
+                // For FULL_UNIT mode
+                const hasActiveLease = u.leases && u.leases.length > 0;
+                if (hasActiveLease || u.status === 'Occupied' || u.status === 'Fully Booked') {
                     occupiedUnitsCount++;
                 } else {
                     vacantUnitsCount++;
@@ -167,7 +183,10 @@ exports.getOwnerProperties = async (req, res) => {
             where: {
                 owners: { some: { id: ownerId } }
             },
-            include: { units: { include: { bedroomsList: true } }, owners: true }
+            include: {
+                units: { include: { bedroomsList: true, leases: { where: { status: 'Active' } } } },
+                owners: true
+            }
         });
 
         const formatted = await Promise.all(properties.map(async p => {
@@ -180,14 +199,17 @@ exports.getOwnerProperties = async (req, res) => {
 
             p.units.forEach(u => {
                 if (u.rentalMode === 'BEDROOM_WISE') {
-                    const occBeds = u.bedroomsList.filter(b => b.status === 'Occupied').length;
-                    const vacBeds = u.bedroomsList.filter(b => b.status === 'Vacant').length;
+                    const occupiedRoomIds = new Set(u.leases.filter(l => l.bedroomId).map(l => l.bedroomId));
+                    const occBeds = u.bedroomsList.filter(b => b.status === 'Occupied' || occupiedRoomIds.has(b.id)).length;
+                    const vacBeds = u.bedroomsList.length - occBeds;
+
                     occupiedBedroomsCount += occBeds;
-                    vacantBedroomsCount += vacBeds;
+                    vacantBedroomsCount += Math.max(0, vacBeds);
                     if (occBeds > 0) occupiedUnitsCount++;
                     else vacantUnitsCount++;
                 } else {
-                    if (u.status === 'Occupied' || u.status === 'Fully Booked') {
+                    const hasActiveLease = u.leases && u.leases.length > 0;
+                    if (hasActiveLease || u.status === 'Occupied' || u.status === 'Fully Booked') {
                         occupiedUnitsCount++;
                     } else {
                         vacantUnitsCount++;
